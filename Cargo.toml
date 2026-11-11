@@ -1,0 +1,23 @@
+[workspace]
+resolver = "2"
+members = ["crates/zaplaunch-ui", "crates/zaplaunch", "crates/zaplaunch-sys", "crates/zaplaunch-core"]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+authors = ["寒星"]
+
+[profile.release]
+# 注意：不要开 lto = true（full LTO）。
+# 2026-10-21 实测：在 x86_64-pc-windows-gnu 下对 Slint 依赖链做 full LTO，
+# rustc 会挂死（CPU 时间不再增长，25 分钟无进展）。
+# 改用 thin LTO + codegen-units = 1：单编译单元实测比默认 16 单元减少约 383KB。
+opt-level = "z"
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.release.package."*"]
+opt-level = "z"
+codegen-units = 1
