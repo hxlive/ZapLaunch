@@ -1,0 +1,43 @@
+// 调色板（公共）—— 主面板 / 设置页 / 属性页三屏共用，改主题只改这里。
+// 数值来源：ui-prototype.html :root（浅）/ body.dark（深）；ui-prototype-pages.html 新增 card / danger。
+// 对应说明：app/docs/设计规格.md 第 1 节 + 第 7.1 节。
+
+export global Palette {
+    // 主题开关：false=浅色（默认），true=深色。
+    // UI 层（月亮/太阳按钮、设置页主题卡片）翻转；Rust 侧可 set 初始值。
+    in-out property <bool> dark: false;
+
+    out property <color> surface: dark ? #1B1E24 : #FCFCFD;
+    out property <color> ink: dark ? #E4E8F0 : #1F2430;
+    out property <color> muted: dark ? #9AA3B2 : #586070;
+    out property <color> accent: dark ? #93AEC9 : #1B3B6F;
+    out property <color> accentHover: dark ? #A7BFD4 : #163257;
+    out property <color> accentActive: dark ? #7E9CB8 : #10263F;
+    out property <color> onAccent: dark ? #13263A : #FFFFFF;
+    out property <color> plBg: dark ? #262B34 : #F1F3F7;
+    out property <color> plBorder: dark ? #343B47 : #E4E8EF;
+    out property <color> plHover: dark ? #2D333E : #E8ECF3;
+    out property <color> selBg: dark ? #2B3340 : #FFFFFF;
+    out property <color> footBg: dark ? #16181E : #F5F6F9;
+    out property <color> gridLine: dark ? #2D3035 : #EBECEE;
+    out property <color> line: dark ? #FFFFFF14 : #0F172A12;
+    out property <color> panelBorder: dark ? #FFFFFF17 : #0F172A14;
+    out property <color> hoverBg: dark ? #FFFFFF12 : #0F172A0F;
+    out property <color> selRing: dark ? #93AEC938 : #1B3B6F24;
+    out property <color> barShadow: dark ? #FFFFFF33 : #0F172A2E;
+    // 关闭按钮悬停红（Windows 惯例，两主题同值）
+    out property <color> closeHover: #D63B43;
+    out property <color> kbdText: dark ? #C9CFDA : #3A4352;
+    out property <color> kbdBorder: dark ? #3B4250 : #D3D9E3;
+    out property <color> kbdBg: dark ? #262B34 : #FFFFFF;
+
+    // ---- 功能页面（v2.1）新增 ----
+    // 卡片底：设置页主题二选一卡片的浅色块（设计稿 --card）
+    out property <color> card: dark ? #FFFFFF0A : #0F172A08;
+    // 危险操作文字（删除按钮，两主题同值）
+    out property <color> danger: #D63B43;
+    // 开关轨道 off 态
+    out property <color> switchOff: dark ? #3B4250 : #D3D9E3;
+    // 开关滑块（两主题都是白色圆点）
+    out property <color> switchKnob: #FFFFFF;
+}

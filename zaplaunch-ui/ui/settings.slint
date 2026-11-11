@@ -1,0 +1,727 @@
+// ⑩ 设置页（480×640，四分组）—— 设计稿：ui-prototype.html 第⑩屏
+// 规格：app/docs/设计规格.md 第 7.8 节（标题栏 40 + 主体 556 + 底栏 44；左导航 132，右内容 padding 18）
+// v2.9 行距规则：行高 63（上下各 12 呼吸）；SectionTitle 高 20、下间距 12、组间距 20。
+//        行为页内容实测需要 514px —— 窗口 600 时只有 478 可用（溢出 36），故提到 640。
+//
+// 所有设置项统一走 setting-changed(key, value) 回调（Rust 侧按 key 分发），
+// 避免「加一个选项就加一条回调」把接口撑爆。动作型入口（打开目录 / 清除历史 /
+// 导入导出 / 恢复默认 / 关闭 / 拖动）保留独立回调。
+
+import { Palette } from "palette.slint";
+import {
+    ActionButton, Toggle, SectionTitle, SimpleTitleBar,
+    SelectRow, HotkeyRow, DualActionRow,
+} from "widgets.slint";
+
+// 左侧导航项：116×36 r8；选中 surface 底 + accent 字 + 浅描边
+//   （与属性对话框的横页签 .t2 同源件：同高 36、同圆角 8、同选中配色）
+component NavItem inherits Rectangle {
+    in property <string> text;
+    in property <bool> active;
+    callback clicked();
+
+    height: 36px;
+    width: 116px;
+    border-radius: 8px;
+    background: root.active ? Palette.surface : transparent;
+
+    Text {
+        x: 12px;
+        y: 0;
+        width: parent.width - 24px;
+        height: parent.height;
+        text: root.text;
+        font-size: 13px;
+        font-weight: root.active ? 600 : 400;
+        color: root.active ? Palette.accent : Palette.muted;
+        vertical-alignment: center;
+    }
+
+    tap := TouchArea {
+        clicked => { root.clicked(); }
+        mouse-cursor: pointer;
+    }
+}
+
+// 主题二选一卡片：151×56 r12，选中 accent 边 + 3px 光圈
+component ThemeCard inherits Rectangle {
+    in property <string> label;
+    in property <string> icon-cmds;
+    in property <bool> selected;
+    callback clicked();
+
+    width: 151px;
+    height: 56px;
+    border-radius: 12px;
+    background: Palette.card;
+    border-width: 1px;
+    border-color: root.selected ? Palette.accent : Palette.plBorder;
+
+    // 光圈（box-shadow 0 0 0 3px 的几何等价）：外扩 3px 的描边层
+    Rectangle {
+        visible: root.selected;
+        x: -3px;
+        y: -3px;
+        width: parent.width + 6px;
+        height: parent.height + 6px;
+        border-radius: 15px;
+        border-width: 3px;
+        border-color: Palette.selRing;
+        background: transparent;
+    }
+
+    // dot 28×28 r8：常态 plBg 底 + muted 图标；选中 accent 底 + 白图标
+    Rectangle {
+        x: 12px;
+        y: (parent.height - 28px) / 2;
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+        background: root.selected ? Palette.accent : Palette.plBg;
+
+        Path {
+            width: 16px;
+            height: 16px;
+            x: (parent.width - 16px) / 2;
+            y: (parent.height - 16px) / 2;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            fill: transparent;
+            stroke: root.selected ? #FFFFFF : Palette.muted;
+            stroke-width: 1.8px;
+            commands: root.icon-cmds;
+        }
+    }
+
+    Text {
+        x: 12px + 28px + 10px;
+        y: 0;
+        width: parent.width - 12px - 28px - 10px - 12px;
+        height: parent.height;
+        text: root.label;
+        font-size: 13px;
+        font-weight: 500;
+        color: Palette.ink;
+        vertical-alignment: center;
+    }
+
+    tap := TouchArea {
+        clicked => { root.clicked(); }
+        mouse-cursor: pointer;
+    }
+}
+
+// 设置行（开关型）：高 44，上边线；左 13px 主文字 + 11px 副文字，右开关
+component SwitchRow inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in-out property <bool> checked;
+    callback toggled(bool);
+
+    height: 63px;
+    background: transparent;
+    in property <bool> show-line: true;
+
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: 1px;
+        background: Palette.line;
+        visible: root.show-line;
+    }
+
+    Text {
+        x: 0;
+        y: 12px;
+        width: parent.width - 52px;
+        height: 18px;
+        text: root.title;
+        font-size: 13px;
+        color: Palette.ink;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    Text {
+        x: 0;
+        y: 34px;
+        width: parent.width - 52px;
+        height: 17px;
+        text: root.subtitle;
+        font-size: 12px;
+        color: Palette.muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    toggle := Toggle {
+        x: parent.width - 40px;
+        y: (parent.height - 22px) / 2;
+        checked: root.checked;
+        toggled(v) => { root.toggled(v); }
+    }
+}
+
+// 设置行（按钮型）：左主/副文字 + 右按钮
+component ActionRow inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <string> action-text;
+    in property <bool> enabled: true;
+    callback action();
+
+    height: 63px;
+    background: transparent;
+    in property <bool> show-line: true;
+
+    Rectangle {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: 1px;
+        background: Palette.line;
+        visible: root.show-line;
+    }
+
+    Text {
+        x: 0;
+        y: 12px;
+        width: parent.width - 140px;
+        height: 18px;
+        text: root.title;
+        font-size: 13px;
+        color: Palette.ink;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+    Text {
+        x: 0;
+        y: 34px;
+        width: parent.width - 140px;
+        height: 17px;
+        text: root.subtitle;
+        font-size: 12px;
+        color: Palette.muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    act := ActionButton {
+        x: parent.width - self.width;
+        y: (parent.height - 32px) / 2;
+        text: root.action-text;
+        enabled: root.enabled;
+        kind: 0;
+        clicked => { root.action(); }
+    }
+}
+
+export component SettingsWindow inherits Window {
+    title: "ZapLaunch 设置";
+    width: 480px;
+    height: 640px;
+    background: Palette.surface;
+    no-frame: true;
+    default-font-family: "Microsoft YaHei";
+
+    // 当前分组：0 外观 / 1 行为 / 2 热键 / 3 数据
+    in-out property <int> tab: 0;
+
+    // ---- 外观 ----
+    in-out property <string> theme-mode: "light"; // "light" | "dark"（跟随系统时由 Rust 解析后传入）
+    in-out property <bool> follow-system: false;
+    in-out property <bool> tile-show-label: true;
+    in-out property <bool> grid-scrollbar: true;
+    in-out property <bool> grid-lines: false;
+    // 一行显示数量（显示串带「个」，是给用户看的；配置里存的是数字，Rust 侧解析）
+    in-out property <string> grid-columns: "7 个";
+    // 按钮排序方式（显示串，配置里存 "manual" | "usage" | "name"）
+    in-out property <string> tile-order: "手动";
+    // ---- 行为 ----
+    in-out property <bool> auto-start: false;
+    in-out property <bool> follow-mouse: true;
+    in-out property <bool> click-to-run: true;
+    in-out property <bool> hide-after-run: true;
+    in-out property <bool> hide-on-blur: true;
+    in-out property <bool> sound-enabled: true;
+    // ---- 热键 ----
+    in-out property <string> hotkey: "Ctrl + Alt + Space";
+    in-out property <bool> recording: false; // 录制态（钩子在宿主侧，UI 只显示状态）
+    in-out property <string> tray-click: "显示面板";
+    in-out property <bool> esc-hide: true;
+    in property <string> hotkey-conflict: "";
+    // ---- 数据 ----
+    in property <string> config-path: "";
+    in-out property <int> history-count: 0;
+    in-out property <bool> history-enabled: true;
+    in property <bool> cache-busy: false;
+    in property <string> cache-status: "按当前启动项重新获取图标";
+
+    // 统一的设置变更出口：key 见 7.13 配置字段表；bool 用 "1"/"0"，其余用原字符串
+    callback setting-changed(string, string);
+    // 动作型入口
+    callback record-hotkey(); // 录制态开关（钩子装在宿主侧，这里只抛意图）
+    callback open-config-dir();
+    callback clear-history();
+    callback rebuild-cache();
+    callback export-config();
+    callback import-config();
+    callback reset-settings();
+    callback close-clicked();
+    callback drag-start();
+
+    // ---- 标题栏 40 ----
+    SimpleTitleBar {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        title-text: "设置";
+        close-clicked => { root.close-clicked(); }
+        drag-start => { root.drag-start(); }
+    }
+
+    // ---- 左导航（主体区 40..476）----
+    Rectangle {
+        x: 0;
+        y: 40px;
+        width: 132px;
+        height: 556px;
+        background: Palette.card;
+
+        Rectangle { x: 131px; y: 0; width: 1px; height: parent.height; background: Palette.line; }
+
+        NavItem { x: 8px; y: 10px; text: "外观"; active: root.tab == 0; clicked => { root.tab = 0; } }
+        NavItem { x: 8px; y: 58px; text: "行为"; active: root.tab == 1; clicked => { root.tab = 1; } }
+        NavItem { x: 8px; y: 106px; text: "热键"; active: root.tab == 2; clicked => { root.tab = 2; } }
+        NavItem { x: 8px; y: 154px; text: "数据"; active: root.tab == 3; clicked => { root.tab = 3; } }
+    }
+
+    // ---- 右内容区（padding 18 → 容器 x=150 / y=58 / 宽 312 / 高 400）----
+    Rectangle {
+        x: 150px;
+        y: 58px;
+        width: 312px;
+        height: 520px;
+
+        // ============ a 外观 ============
+        if root.tab == 0: Rectangle {
+            x: 0;
+            y: 0;
+            width: 312px;
+            height: 520px;
+
+            SectionTitle { x: 0px; y: 0px; width: 120px; text: "主题"; }
+
+            ThemeCard {
+                x: 0px;
+                y: 32px;
+                label: "浅色";
+                icon-cmds: "M 16 12 C 16 14.21 14.21 16 12 16 C 9.79 16 8 14.21 8 12 C 8 9.79 9.79 8 12 8 C 14.21 8 16 9.79 16 12 Z M 12 1 L 12 3 M 12 21 L 12 23 M 4.22 4.22 L 5.64 5.64 M 18.36 18.36 L 19.78 19.78 M 1 12 L 3 12 M 21 12 L 23 12 M 4.22 19.78 L 5.64 18.36 M 18.36 5.64 L 19.78 4.22";
+                selected: root.theme-mode == "light";
+                clicked => {
+                    root.follow-system = false;
+                    root.theme-mode = "light";
+                    root.setting-changed("theme", "light");
+                }
+            }
+            ThemeCard {
+                x: 161px;
+                y: 32px;
+                label: "深色";
+                icon-cmds: "M 20 14.5 C 16.99 15.78 13.51 15.11 11.2 12.8 C 8.89 10.49 8.22 7.01 9.5 4 C 6.19 5.41 4.23 8.86 4.72 12.43 C 5.2 16 8 18.8 11.57 19.28 C 15.14 19.77 18.59 17.81 20 14.5 Z";
+                selected: root.theme-mode == "dark";
+                clicked => {
+                    root.follow-system = false;
+                    root.theme-mode = "dark";
+                    root.setting-changed("theme", "dark");
+                }
+            }
+
+            SwitchRow {
+                x: 0px;
+                y: 96px;
+                width: 312px;
+                show-line: false;
+                title: "跟随系统主题";
+                subtitle: "Windows 深浅色切换时自动变换";
+                checked: root.follow-system;
+                toggled(v) => {
+                    root.follow-system = v;
+                    root.setting-changed("theme", v ? "system" : root.theme-mode);
+                }
+            }
+
+            SectionTitle { x: 0px; y: 171px; width: 120px; text: "面板"; }
+
+            SwitchRow {
+                x: 0px;
+                y: 203px;
+                width: 312px;
+                show-line: false;
+                title: "磁贴上显示名称";
+                subtitle: "关闭后只留图标，密度更高";
+                checked: root.tile-show-label;
+                toggled(v) => {
+                    root.tile-show-label = v;
+                    root.setting-changed("tile_show_label", v ? "1" : "0");
+                }
+            }
+            columns_select := SelectRow {
+                x: 0px;
+                y: 266px;
+                z: columns_select.open ? 100 : 0;
+                width: 312px;
+                show-line: true;
+                title: "一行显示数量";
+                subtitle: "6 ~ 8 个，越多越密";
+                value: root.grid-columns;
+                options: ["6 个", "7 个", "8 个"];
+                offset-x: 150px;
+                offset-y: 324px;
+                selected(v) => {
+                    root.grid-columns = v;
+                    root.setting-changed("grid_columns", v);
+                }
+            }
+            order_select := SelectRow {
+                x: 0px;
+                y: 329px;
+                z: order_select.open ? 100 : 0;
+                width: 312px;
+                show-line: true;
+                title: "按钮排序方式";
+                subtitle: root.tile-order == "手动" ? "拖动磁贴调整顺序" : "切回手动可恢复顺序";
+                value: root.tile-order;
+                options: ["手动", "按使用次数", "按名称"];
+                offset-x: 150px;
+                offset-y: 387px;
+                selected(v) => {
+                    root.tile-order = v;
+                    root.setting-changed("tile_order", v);
+                }
+            }
+            SwitchRow {
+                x: 0px;
+                y: 392px;
+                width: 312px;
+                title: "网格滚动条";
+                subtitle: "按钮超出两行时显示";
+                checked: root.grid-scrollbar;
+                toggled(v) => {
+                    root.grid-scrollbar = v;
+                    root.setting-changed("grid_scrollbar", v ? "1" : "0");
+                }
+            }
+            SwitchRow {
+                x: 0px;
+                y: 455px;
+                width: 312px;
+                title: "显示网格线";
+                subtitle: "用细线区分图标格子";
+                checked: root.grid-lines;
+                toggled(v) => {
+                    root.grid-lines = v;
+                    root.setting-changed("grid_lines", v ? "1" : "0");
+                }
+            }
+        }
+
+        // ============ b 行为 ============
+        if root.tab == 1: Rectangle {
+            x: 0;
+            y: 0;
+            width: 312px;
+            height: 520px;
+
+            SectionTitle { x: 0px; y: 0px; width: 120px; text: "启动"; }
+
+            SwitchRow {
+                x: 0px;
+                y: 28px;
+                width: 312px;
+                show-line: false;
+                title: "开机自动启动";
+                subtitle: "写 HKCU\\Run，不需要管理员权限";
+                checked: root.auto-start;
+                toggled(v) => {
+                    root.auto-start = v;
+                    root.setting-changed("auto_start", v ? "1" : "0");
+                }
+            }
+
+            SectionTitle { x: 0px; y: 115px; width: 120px; text: "呼出与收起"; }
+
+            SwitchRow {
+                x: 0px;
+                y: 147px;
+                width: 312px;
+                show-line: false;
+                title: "面板跟随鼠标位置弹出";
+                subtitle: "贴屏幕边缘时自动内缩不越界";
+                checked: root.follow-mouse;
+                toggled(v) => {
+                    root.follow-mouse = v;
+                    root.setting-changed("follow_mouse", v ? "1" : "0");
+                }
+            }
+            SwitchRow {
+                x: 0px;
+                y: 210px;
+                width: 312px;
+                title: "单击磁贴即启动";
+                subtitle: "关闭则改为双击启动";
+                checked: root.click-to-run;
+                toggled(v) => {
+                    root.click-to-run = v;
+                    root.setting-changed("click_to_run", v ? "1" : "0");
+                }
+            }
+            SwitchRow {
+                x: 0px;
+                y: 273px;
+                width: 312px;
+                title: "启动后立即收起面板";
+                subtitle: "即用即走，不等目标窗口出现";
+                checked: root.hide-after-run;
+                toggled(v) => {
+                    root.hide-after-run = v;
+                    root.setting-changed("hide_after_run", v ? "1" : "0");
+                }
+            }
+            SwitchRow {
+                x: 0px;
+                y: 336px;
+                width: 312px;
+                title: "失去焦点自动收起";
+                subtitle: "点到别的应用即隐藏";
+                checked: root.hide-on-blur;
+                toggled(v) => {
+                    root.hide-on-blur = v;
+                    root.setting-changed("hide_on_blur", v ? "1" : "0");
+                }
+            }
+
+            SectionTitle { x: 0px; y: 419px; width: 120px; text: "声音"; }
+
+            SwitchRow {
+                x: 0px;
+                y: 451px;
+                width: 312px;
+                show-line: false;
+                title: "启用事件声音";
+                subtitle: "启动 / 拖入 / 切群组三事件";
+                checked: root.sound-enabled;
+                toggled(v) => {
+                    root.sound-enabled = v;
+                    root.setting-changed("sound_enabled", v ? "1" : "0");
+                }
+            }
+        }
+
+        // ============ c 热键 ============
+        if root.tab == 2: Rectangle {
+            x: 0;
+            y: 0;
+            width: 312px;
+            height: 520px;
+
+            SectionTitle { x: 0px; y: 0px; width: 120px; text: "全局呼出"; }
+
+            HotkeyRow {
+                x: 0px;
+                y: 28px;
+                width: 312px;
+                label: "呼出热键";
+                hotkey: root.hotkey;
+                recording: root.recording;
+                changed(v) => {
+                    root.hotkey = v;
+                    root.setting-changed("hotkey", v);
+                }
+                record-clicked => { root.record-hotkey(); }
+            }
+
+            Text {
+                x: 78px;
+                y: 70px;
+                width: 234px;
+                height: 38px;
+                text: root.hotkey-conflict != "" ? root.hotkey-conflict : "注册失败会提示冲突（如被输入法占用），显示当前占用进程名。";
+                font-size: 12px;
+                color: root.hotkey-conflict != "" ? Palette.danger : Palette.muted;
+                wrap: word-wrap;
+            }
+
+            SectionTitle { x: 0px; y: 128px; width: 120px; text: "托盘"; }
+
+            SelectRow {
+                x: 0px;
+                y: 160px;
+                width: 312px;
+                show-line: false;
+                title: "单击托盘图标";
+                subtitle: "左键单击托盘图标时的动作";
+                value: root.tray-click;
+                options: ["显示面板", "无动作"];
+                offset-x: 150px;
+                offset-y: 218px;
+                selected(v) => {
+                    root.tray-click = v;
+                    root.setting-changed("tray_click", v == "显示面板" ? "panel" : "none");
+                }
+            }
+
+            SwitchRow {
+                x: 0px;
+                y: 223px;
+                width: 312px;
+                title: "Esc 收起面板";
+                subtitle: "面板内 Esc 一次清词、二次收起";
+                checked: root.esc-hide;
+                toggled(v) => {
+                    root.esc-hide = v;
+                    root.setting-changed("esc_hide", v ? "1" : "0");
+                }
+            }
+        }
+
+        // ============ d 数据 ============
+        if root.tab == 3: Rectangle {
+            x: 0;
+            y: 0;
+            width: 312px;
+            height: 520px;
+
+            SectionTitle { x: 0px; y: 0px; width: 120px; text: "配置文件"; }
+
+            ActionRow {
+                x: 0px;
+                y: 28px;
+                width: 312px;
+                show-line: false;
+                title: root.config-path;
+                subtitle: "单文件、原子写入、保留最近 5 份备份";
+                action-text: "打开目录";
+                action => { root.open-config-dir(); }
+            }
+
+            DualActionRow {
+                x: 0px;
+                y: 95px;
+                width: 312px;
+                title: "导入 / 导出";
+                subtitle: "整机迁移用，导出为同一份 JSON";
+                secondary-text: "导出";
+                primary-text: "导入";
+                secondary-clicked => { root.export-config(); }
+                primary-clicked => { root.import-config(); }
+            }
+
+            SectionTitle { x: 0px; y: 178px; width: 120px; text: "运行历史"; }
+
+            ActionRow {
+                x: 0px;
+                y: 210px;
+                width: 312px;
+                show-line: false;
+                title: "保留最近 " + root.history-count + " 条";
+                subtitle: "原版 RunHistory 的现代形态";
+                action-text: "清除历史";
+                action => { root.clear-history(); }
+            }
+
+            SwitchRow {
+                x: 0px;
+                y: 273px;
+                width: 312px;
+                title: "记录按钮启动时间";
+                subtitle: "关闭后历史列表不再更新";
+                checked: root.history-enabled;
+                toggled(v) => {
+                    root.history-enabled = v;
+                    root.setting-changed("history_enabled", v ? "1" : "0");
+                }
+            }
+
+            ActionRow {
+                x: 0px;
+                y: 336px;
+                width: 312px;
+                title: "图标缓存";
+                subtitle: root.cache-status;
+                action-text: root.cache-busy ? "重建中…" : "重建缓存";
+                enabled: !root.cache-busy;
+                action => { root.rebuild-cache(); }
+            }
+
+            SectionTitle { x: 0px; y: 419px; width: 120px; text: "重置"; }
+
+            ActionRow {
+                x: 0px;
+                y: 451px;
+                width: 312px;
+                show-line: false;
+                title: "恢复默认设置";
+                subtitle: "只重置设置项，按钮与群组保留";
+                action-text: "恢复默认";
+                action => { root.reset-settings(); }
+            }
+        }
+    }
+
+    // ---- 底栏 44 ----
+    Rectangle {
+        x: 0;
+        y: parent.height - 44px;
+        width: parent.width;
+        height: 44px;
+        background: Palette.footBg;
+
+        Rectangle { x: 0; y: 0; width: parent.width; height: 1px; background: Palette.line; }
+
+        Text {
+            x: 14px;
+            y: 0;
+            width: 200px;
+            height: parent.height;
+            text: "设置即时生效";
+            font-size: 12px;
+            color: Palette.muted;
+            vertical-alignment: center;
+        }
+
+        done := ActionButton {
+            x: parent.width - 14px - self.width;
+            y: (parent.height - 32px) / 2;
+            text: "完成";
+            kind: 1;
+            clicked => { root.close-clicked(); }
+        }
+        reset := ActionButton {
+            x: done.x - 10px - self.width;
+            y: (parent.height - 32px) / 2;
+            text: "恢复默认";
+            kind: 0;
+            clicked => { root.reset-settings(); }
+        }
+    }
+
+    // 键盘焦点代理（0×0，只吃键盘）：录制态下 Esc 取消、其余按键吞掉。
+    // 与主面板同一个套路（见 panel.slint 的 esc-scope）。
+    forward-focus: rec-scope;
+    rec-scope := FocusScope {
+        x: 0px;
+        y: 0px;
+        width: 0px;
+        height: 0px;
+        key-pressed(event) => {
+            if (root.recording) {
+                if (event.text == Key.Escape) {
+                    root.record-hotkey(); // 宿主侧按「再点一次」处理 = 取消
+                }
+                return accept; // 录制期间不让按键漏给别处
+            }
+            return reject;
+        }
+    }
+}

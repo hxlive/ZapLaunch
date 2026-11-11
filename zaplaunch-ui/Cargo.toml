@@ -1,0 +1,14 @@
+[package]
+name = "zaplaunch-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# 铁律：必须锁 renderer-software（CPU 渲染），禁用 femtovg/GPU 后端（实测 88MB）。
+# raw-window-handle-06 用于向 zaplaunch-sys 暴露 HWND（窗口拖动需要）。
+slint = { version = "=1.18.1", default-features = false, features = ["std", "backend-winit", "renderer-software", "compat-1-2", "raw-window-handle-06"] }
+
+[build-dependencies]
+slint-build = "=1.18.1"
+image = { version = "0.25.10", default-features = false, features = ["png"] }

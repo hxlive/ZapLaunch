@@ -1,0 +1,22 @@
+[package]
+name = "zaplaunch"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "轻量快捷启动栏"
+
+[[bin]]
+name = "zaplaunch"
+path = "src/main.rs"
+
+[dependencies]
+slint = { version = "=1.18.1", default-features = false, features = ["std", "backend-winit", "renderer-software", "compat-1-2", "raw-window-handle-06"] }
+raw-window-handle = "0.6"
+url = "2"
+image = { version = "0.25.10", default-features = false, features = ["ico", "png"] }
+# 与 Slint 1.18.1 同版本，仅用于显式标记整窗重绘，避免软件渲染跨显隐复用失效的局部帧。
+i-slint-core = { version = "=1.18.1", default-features = false, features = ["std"] }
+zaplaunch-ui = { path = "../zaplaunch-ui" }
+zaplaunch-sys = { path = "../zaplaunch-sys" }
+zaplaunch-core = { path = "../zaplaunch-core" }

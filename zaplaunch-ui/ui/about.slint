@@ -1,0 +1,152 @@
+// ⑪ 关于（380×264）—— 左右结构，规格见设计规格.md 第 7.9 节。
+// 界面图标源自 app/ZapLaunch-256.png，显示时按实际 DPI 高质量缩小。
+
+import { Palette } from "palette.slint";
+import { ActionButton, SimpleTitleBar, NativeIconImage, IconRenderer } from "widgets.slint";
+
+export component AboutWindow inherits Window {
+    title: "关于 ZapLaunch";
+    width: 380px;
+    height: 264px;
+    background: Palette.surface;
+    no-frame: true;
+    default-font-family: "Microsoft YaHei";
+
+    in property <string> version-text: "版本 1.0.0";
+    in property <string> build-text: "构建：rustc · x86_64-pc-windows-gnu";
+
+    callback close-clicked();
+    callback drag-start();
+
+    // ---- 标题栏 40 ----
+    SimpleTitleBar {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        title-text: "关于";
+        close-clicked => { root.close-clicked(); }
+        drag-start => { root.drag-start(); }
+    }
+
+    // ---- 内容 180（40..220）----
+    Rectangle {
+        x: 0;
+        y: 40px;
+        width: 380px;
+        height: 180px;
+
+        // 与 exe / 托盘一致的应用图标，不再画旧的 accent 底闪电。
+        NativeIconImage {
+            x: 32px;
+            y: (parent.height - self.height) / 2;
+            width: 96px;
+            height: 96px;
+            original: IconRenderer.logo();
+            image-fit: contain;
+        }
+
+        Text {
+            x: 160px;
+            y: 14px;
+            width: 196px;
+            height: 28px;
+            text: "ZapLaunch";
+            font-size: 20px;
+            font-weight: 600;
+            color: Palette.ink;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+        }
+
+        Text {
+            x: 160px;
+            y: 50px;
+            width: 196px;
+            height: 18px;
+            text: root.version-text;
+            font-size: 12px;
+            color: Palette.muted;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+        }
+
+        Text {
+            x: 160px;
+            y: 74px;
+            width: 196px;
+            height: 18px;
+            text: "作者：寒星";
+            font-size: 12px;
+            color: Palette.muted;
+            vertical-alignment: center;
+        }
+
+        Text {
+            x: 160px;
+            y: 98px;
+            width: 196px;
+            height: 18px;
+            text: "反馈邮箱：hx@hxlive.cn";
+            font-size: 12px;
+            color: Palette.muted;
+            vertical-alignment: center;
+        }
+
+        Text {
+            x: 160px;
+            y: 125px;
+            width: 196px;
+            height: 20px;
+            text: "轻量快捷启动栏，呼出即用";
+            font-size: 12px;
+            color: Palette.muted;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+        }
+
+        // 声明块：上方 1px 分隔线
+        Rectangle { x: 160px; y: 151px; width: 196px; height: 1px; background: Palette.line; }
+
+        Text {
+            x: 160px;
+            y: 157px;
+            width: 196px;
+            height: 16px;
+            text: "开源许可 GPL-3.0";
+            font-size: 11.5px;
+            color: Palette.muted;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+        }
+    }
+
+    // ---- 底栏 44（220..264）----
+    Rectangle {
+        x: 0;
+        y: parent.height - 44px;
+        width: parent.width;
+        height: 44px;
+        background: Palette.footBg;
+
+        Rectangle { x: 0; y: 0; width: parent.width; height: 1px; background: Palette.line; }
+
+        Text {
+            x: 14px;
+            y: 0;
+            width: 260px;
+            height: parent.height;
+            text: root.build-text;
+            font-size: 11px;
+            color: Palette.muted;
+            vertical-alignment: center;
+        }
+
+        ok := ActionButton {
+            x: parent.width - 14px - self.width;
+            y: (parent.height - 32px) / 2;
+            text: "好";
+            kind: 1;
+            clicked => { root.close-clicked(); }
+        }
+    }
+}

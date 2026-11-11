@@ -1,0 +1,1662 @@
+// 主面板 v2 · 严格对齐 ui-prototype.html（ZapLaunch 现代化卡片风，星哥 2026-10-21 选定）
+// ---------------------------------------------------------------------------
+// 本文件的每一个数值都来自设计稿 CSS / 内联样式，逐项对应关系见 app/docs/设计规格.md。
+// 改界面的顺序：先改设计稿 → 再改设计规格.md → 最后改本文件。禁止直接凭手感调数值。
+//
+// 设计稿结构 → Slint 组件对照：
+//   标题栏(40px, logo+标题+齿轮+最小化+关闭) → TitleBar
+//   搜索条(44px, .f1f3f7 圆角12)             → SearchBar
+//   群组标签行(44px, 下划线选中)              → GroupTabs
+//   网格区(202px, 列数可配 6/7/8, mask 渐隐)    → TileGrid + TileView
+//   底栏(44px, #f5f6f9)                       → PanelFoot
+//
+// 风格铁律：Windows 风格。最小化/关闭在右上角，关闭悬停变红。禁止 macOS 交通灯。
+
+// ===========================================================================
+// 依赖：调色板（三屏共用）+ 功能页面窗口（import 后进入同一编译单元）
+// ===========================================================================
+import { Palette } from "palette.slint";
+import { ActionButton, DangerLink, IconRenderer, NativeIconImage, TitleIconImage, LetterIcon } from "widgets.slint";
+import { SettingsWindow } from "settings.slint";
+import { PropsWindow } from "props.slint";
+import { AboutWindow } from "about.slint";
+
+// 转发导出：zaplaunch 通过 zaplaunch_ui::Palette / SettingsWindow / PropsWindow 访问。
+// （只 import 不 export 的话，Slint 生成代码不会把它们暴露到 crate 根）
+export { Palette }
+export { SettingsWindow }
+export { PropsWindow }
+export { AboutWindow }
+export { IconRenderer }
+
+// ===========================================================================
+// 数据模型 v2
+// ===========================================================================
+export struct Tile {
+    letter: string,
+    label: string,
+    // Slint Path commands（24 视框，由 tools/svg2slint.py 从设计稿生成）
+    icon: string,
+    // 图标描边色（语义色，随按钮内容走）
+    tint: color,
+    // 是否使用系统原生文件/快捷方式/EXE 图标
+    has-native-icon: bool,
+    // 系统原生图标位图
+    native-icon: image,
+    // 选中态（设计稿 .cell.sel：白底 + accent 边 + 3px 光圈）
+    sel: bool,
+}
+
+export struct Group {
+    name: string,
+}
+
+/// 一条运行历史（⑬ 浮层行，设计规格 7.11）。
+export struct HistoryRow {
+    letter: string,
+    // 按钮名称
+    label: string,
+    // Slint Path commands（与 Tile.icon 同源）
+    icon: string,
+    // 图标描边色（与 Tile.tint 同源）
+    tint: color,
+    // 是否使用系统原生图标
+    has-native-icon: bool,
+    // 系统原生图标位图
+    native-icon: image,
+    // 右端相对时间文案（「2 分钟前」等），由 Rust 侧算好
+    time: string,
+}
+
+// ===========================================================================
+// kbd 按键（设计稿 kbd：11px/600 #3a4352 白底 #d3d9e3 边底边2px r5 padding 1px 6px）
+// ===========================================================================
+component Kbd inherits Rectangle {
+    in property <string> text;
+    callback clicked();
+    height: 17px;
+    width: kbd_txt.preferred-width + 12px; // 6px 左右 padding
+    border-radius: 5px;
+    border-width: 1px;
+    border-color: Palette.kbdBorder;
+    background: Palette.kbdBg;
+    // border-bottom-width: 2px 的视觉：底部叠一条 2px 同色线
+    Rectangle {
+        y: parent.height - 2px;
+        width: parent.width;
+        height: 2px;
+        background: Palette.kbdBorder;
+    }
+    kbd_txt := Text {
+        text: root.text;
+        font-size: 11px;
+        font-weight: 600;
+        color: Palette.kbdText;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: parent.width;
+        height: parent.height;
+    }
+    tap := TouchArea { clicked => { root.clicked(); } }
+}
+
+// ===========================================================================
+// 标题栏窗口按钮（设计稿 .wc 46×40；关闭悬停 .wc.cl:hover 红）
+// ===========================================================================
+component CapButton inherits Rectangle {
+    in property <string> icon-cmds;
+    in property <bool> is-close: false;
+    in property <length> hit-width: 46px; // 设置齿轮收窄为 34px
+    callback clicked();
+
+    width: hit-width;
+    height: 40px;
+    background: tap.has-hover ? (is-close ? Palette.closeHover : Palette.hoverBg) : transparent;
+    animate background { duration: 120ms; }
+
+    Path {
+        width: 14px;
+        height: 14px;
+        x: (parent.width - 14px) / 2;
+        y: (parent.height - 14px) / 2;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        fill: transparent;
+        stroke: tap.has-hover ? (is-close ? #FFFFFF : Palette.ink) : Palette.muted;
+        stroke-width: 1.8px;
+        commands: icon-cmds;
+    }
+
+    tap := TouchArea {
+        clicked => { root.clicked(); }
+        mouse-cursor: pointer;
+    }
+}
+
+// ===========================================================================
+// 标签行右侧图标按钮（设计稿 .ib 44×44 r10，悬停 rgba(15,23,42,.06)）
+// ===========================================================================
+component IconAction inherits Rectangle {
+    in property <string> icon-cmds;
+    callback clicked();
+
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    background: tap.has-hover ? Palette.hoverBg : transparent;
+    animate background { duration: 120ms; }
+
+    Path {
+        width: 18px;
+        height: 18px;
+        x: (parent.width - 18px) / 2;
+        y: (parent.height - 18px) / 2;
+        viewbox-width: 24;
+        viewbox-height: 24;
+        fill: transparent;
+        stroke: tap.has-hover ? Palette.ink : Palette.muted;
+        stroke-width: 1.8px;
+        commands: icon-cmds;
+    }
+
+    tap := TouchArea {
+        clicked => { root.clicked(); }
+        mouse-cursor: pointer;
+    }
+}
+
+// ===========================================================================
+// 区块 A · 标题栏（设计稿：高 40px，padding-left 14px，gap 8px）
+//   logo 24×24（与 exe / 托盘同源）；标题 12px/600 muted 撑满中间；
+//   右侧：设置齿轮(34px) + 最小化(46px) + 关闭(46px，与最小化重叠 8px)
+// ===========================================================================
+component TitleBar inherits Rectangle {
+    in property <string> title-text: "ZapLaunch";
+    callback settings-clicked();
+    callback minimize-clicked();
+    callback close-clicked();
+    callback drag-start();
+
+    height: 40px;
+    background: Palette.surface;
+
+    // 与 exe / 托盘 / 关于窗口同源的应用图标。
+    TitleIconImage {
+        x: 14px;
+        y: (parent.height - 24px) / 2;
+        width: 24px;
+        height: 24px;
+        image-fit: contain;
+    }
+
+    // 标题：flex:1 → 12px/600 muted，letter-spacing .2px（Slint 无字距，忽略）
+    Text {
+        x: 14px + 24px + 8px;
+        width: parent.width - 14px - 24px - 8px - 126px; // 右侧按钮区 126px
+        height: parent.height;
+        text: root.title-text;
+        font-size: 12px;
+        font-weight: 600;
+        color: Palette.muted;
+        vertical-alignment: center;
+    }
+
+    // 右侧按钮组（绝对定位实现「关闭与最小化重叠 8px」）：
+    //   关闭 x = W-46；最小化 x = W-46-46+8 = W-84；齿轮 x = W-84-34-8 = W-126
+    CapButton {
+        x: parent.width - 126px;
+        hit-width: 34px;
+        icon-cmds: "M 19.4 15 C 19.13 15.62 19.26 16.34 19.73 16.82 L 19.79 16.88 C 20.57 17.66 20.57 18.93 19.79 19.71 C 19.01 20.49 17.74 20.49 16.96 19.71 L 16.9 19.65 C 16.42 19.18 15.7 19.05 15.08 19.32 C 14.48 19.58 14.08 20.17 14.08 20.83 L 14.08 21 C 14.08 22.1 13.18 23 12.08 23 C 10.98 23 10.08 22.1 10.08 21 L 10.08 20.91 C 10.06 20.23 9.64 19.63 9 19.4 C 8.38 19.13 7.66 19.26 7.18 19.73 L 7.12 19.79 C 6.34 20.57 5.07 20.57 4.29 19.79 C 3.51 19.01 3.51 17.74 4.29 16.96 L 4.35 16.9 C 4.82 16.42 4.95 15.7 4.68 15.08 C 4.42 14.48 3.83 14.08 3.17 14.08 L 3 14.08 C 1.9 14.08 1 13.18 1 12.08 C 1 10.98 1.9 10.08 3 10.08 L 3.09 10.08 C 3.77 10.06 4.37 9.64 4.6 9 C 4.87 8.38 4.74 7.66 4.27 7.18 L 4.21 7.12 C 3.43 6.34 3.43 5.07 4.21 4.29 C 4.99 3.51 6.26 3.51 7.04 4.29 L 7.1 4.35 C 7.58 4.82 8.3 4.95 8.92 4.68 L 9 4.68 C 9.6 4.42 10 3.83 10 3.17 L 10 3 C 10 1.9 10.9 1 12 1 C 13.1 1 14 1.9 14 3 L 14 3.09 C 14 3.75 14.4 4.34 15 4.6 C 15.62 4.87 16.34 4.74 16.82 4.27 L 16.88 4.21 C 17.66 3.43 18.93 3.43 19.71 4.21 C 20.49 4.99 20.49 6.26 19.71 7.04 L 19.65 7.1 C 19.18 7.58 19.05 8.3 19.32 8.92 L 19.32 9 C 19.58 9.6 20.17 10 20.83 10 L 21 10 C 22.1 10 23 10.9 23 12 C 23 13.1 22.1 14 21 14 L 20.91 14 C 20.25 14 19.66 14.4 19.4 15 Z M 15 12 C 15 13.65 13.65 15 12 15 C 10.35 15 9 13.65 9 12 C 9 10.35 10.35 9 12 9 C 13.65 9 15 10.35 15 12 Z";
+        clicked => { root.settings-clicked(); }
+    }
+    CapButton {
+        x: parent.width - 84px;
+        icon-cmds: "M 5 12 L 19 12";
+        clicked => { root.minimize-clicked(); }
+    }
+    CapButton {
+        x: parent.width - 46px;
+        is-close: true;
+        icon-cmds: "M 6 6 L 18 18 M 18 6 L 6 18";
+        clicked => { root.close-clicked(); }
+    }
+
+    // 拖动热区：标题栏左侧空白（logo 到齿轮之间），按下交给系统拖动
+    drag_tap := TouchArea {
+        x: 0;
+        y: 0;
+        width: parent.width - 126px;
+        height: parent.height;
+        mouse-cursor: move;
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root.drag-start();
+            }
+        }
+    }
+}
+
+// ===========================================================================
+// 区块 B · 搜索条（设计稿：外层 padding 0 12px，条 44px r12 bg #f1f3f7 边 rgba(15,23,42,.08)，
+//   内 padding 0 12px gap 10px，放大镜 18×18，输入 14px，右侧 kbd Esc）
+// ===========================================================================
+component SearchBar inherits Rectangle {
+    // 搜索词：与输入框双向绑定（内部用）。
+    //
+    // ⚠️ 别再用 Slint 的 `changed text => {}` 观察它 —— 2026-10-22 实测：
+    //    属性被 `<=>` 拉成别名后，changed 回调**不会**在键盘输入时触发
+    //    （stderr 一条日志都没有）。改用 TextInput 原生的 `edited` 回调，
+    //    由控件自己在文本变化时通知宿主。
+    in-out property <string> text;
+    out property <bool> input-focused: input.has-focus;
+    // 焦点转发终点：MainPanel 的 forward-focus 先指到本组件，再经这里落到输入框。
+    // 这样窗口一被激活就能直接打字（「呼出即打字」，③ 搜索定位）。
+    forward-focus: input;
+    callback text-changed(string);
+    callback accepted();       // Enter：启动当前选中项（无结果时 = 新建按钮）
+    callback down-pressed();   // ↓：展开 ⑬ 运行历史浮层
+    callback tab-pressed(bool);
+    callback esc-clicked();    // 徽标 ×：有词清词、无词收起（同 Esc 键，见规格 7.2）
+
+    // 呼出后焦点直接落进输入框（「呼出即打字」），省掉"先点一下搜索框"这步。
+    // 因此 Esc / ↓ 必须在 TextInput 上接（见下方 key-pressed）——窗口的
+    // forward-focus 目标（esc-scope）在输入态收不到这两个键。
+    public function focus-input() {
+        input.focus();
+    }
+
+    callback release-focus();
+    public function restore-input-focus() {
+        let anchor = input.anchor-position-byte-offset;
+        let cursor = input.cursor-position-byte-offset;
+        root.release-focus();
+        input.focus();
+        input.set-selection-offsets(anchor,cursor);
+    }
+
+    height: 44px;
+    border-radius: 12px;
+    background: Palette.plBg;
+    border-width: 1px;
+    border-color: input.has-focus ? Palette.accent : Palette.panelBorder;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 10px;
+
+        // 放大镜：包满高容器垂直居中（HorizontalLayout 交叉轴默认拉伸）
+        Rectangle {
+            height: parent.height;
+            width: 18px;
+            background: transparent;
+            Path {
+                width: 18px;
+                height: 18px;
+                y: (parent.height - 18px) / 2;
+                viewbox-width: 24;
+                viewbox-height: 24;
+                fill: transparent;
+                stroke: Palette.muted;
+                stroke-width: 1.9px;
+                commands: "M 18 11 C 18 14.87 14.87 18 11 18 C 7.13 18 4 14.87 4 11 C 4 7.13 7.13 4 11 4 C 14.87 4 18 7.13 18 11 Z M 16.5 16.5 L 21 21";
+            }
+        }
+
+        // 输入区：TextInput 无占位符属性，用叠加 Text 模拟（设计稿 placeholder「搜索快捷方式」）
+        Rectangle {
+            height: parent.height;
+            horizontal-stretch: 1;
+            background: transparent;
+            input := TextInput {
+                y: (parent.height - self.preferred-height) / 2;
+                width: parent.width;
+                font-size: 14px;
+                color: Palette.ink;
+                text <=> root.text;
+                accepted => { root.accepted(); }
+                key-pressed(event) => {
+                    if (event.text == Key.Tab && !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta) {
+                        root.tab-pressed(event.modifiers.shift);
+                        accept
+                    } else if (event.text == Key.Escape) {
+                        root.esc-clicked();
+                        accept
+                    } else if (event.text == Key.DownArrow) {
+                        root.down-pressed();
+                        accept
+                    } else {
+                        reject
+                    }
+                }
+                // 文本变化（含键盘输入 / 粘贴）→ 通知宿主重算过滤
+                // ⚠️ `edited` 不带参数（Slint 1.18 实测），文本从别名属性读
+                edited => { root.text-changed(root.text); }
+                // 输入框聚焦时由这里处理 Esc/↓；Rust 轮询此时停用，避免重复触发。
+                // 根级 FocusScope 未持有焦点时仍保留物理按键轮询作为焦点恢复兜底。
+            }
+            Text {
+                // 聚焦时隐藏提示词，避免中文输入法预编辑（Preedit）编码与提示词重叠
+                visible: input.text == "" && !input.has-focus;
+                y: (parent.height - self.preferred-height) / 2;
+                width: parent.width;
+                text: "搜索快捷方式";
+                font-size: 14px;
+                color: Palette.muted;
+            }
+        }
+
+        // Esc 徽标：包满高容器垂直居中
+        Rectangle {
+            height: parent.height;
+            width: esc_kbd.width;
+            background: transparent;
+            esc_kbd := Kbd {
+                text: "Esc";
+                y: (parent.height - self.height) / 2;
+                clicked => { root.esc-clicked(); }
+            }
+        }
+    }
+}
+
+// ===========================================================================
+// 区块 C · 群组标签行（设计稿：padding 2px 4px 0 6px，本实现取 44px 行高；
+//   .tab 高 44 padding 0 12 13px/500；选中下划线 left/right 12 bottom 4 h2 r2 accent）
+// ===========================================================================
+component GroupTabItem inherits Rectangle {
+    in property <string> label;
+    in property <bool> active: false;
+    // 搜索态命中标签：文字也走 accent（设计规格 7.2）。
+    // 常态选中的群组标签只是墨色字 + accent 下划线，两者不能混用。
+    in property <bool> accent-text: false;
+    in property <bool> keyboard-focused: false;
+    callback clicked();
+    callback right-clicked();
+    callback ensure-visible();
+    changed active => { if (root.active) { root.ensure-visible(); } }
+    changed x => { if (root.active) { root.ensure-visible(); } }
+    changed width => { if (root.active) { root.ensure-visible(); } }
+
+    height: 44px;
+    width: tab_row.preferred-width;
+    background: transparent;
+
+    changed keyboard-focused => { if (root.keyboard-focused) { root.flash(); } }
+
+    public function flash() {
+        focus-flash.running = true;
+        focus-flash.restart();
+    }
+
+    focus-flash := Timer {
+        interval: 32ms;
+        running: false;
+        triggered => { self.running = false; }
+    }
+
+    Rectangle {
+        x: 4px;
+        y: 5px;
+        width: parent.width - 8px;
+        height: parent.height - 10px;
+        border-radius: 7px;
+        border-width: 1px;
+        border-color: Palette.accent;
+        background: Palette.plBg;
+        visible: root.active;
+        opacity: 0;
+        states [
+            flash when focus-flash.running: {
+                opacity: 1;
+                out {
+                    animate opacity { duration: 200ms; easing: ease-out; }
+                }
+            }
+        ]
+    }
+
+    // 悬停整标签提亮文字（设计稿 .tab:hover color #1f2430）
+    tab_row := HorizontalLayout {
+        height: parent.height;
+        padding-left: 12px;
+        padding-right: 12px;
+
+        Text {
+            text: root.label;
+            font-size: 13px;
+            font-weight: root.active ? 600 : 500;
+            color: root.accent-text ? Palette.accent
+                : (root.active ? Palette.ink : (tap.has-hover ? Palette.ink : Palette.muted));
+            vertical-alignment: center;
+        }
+    }
+
+    // 选中下划线（设计稿 .tab.on::after）
+    Rectangle {
+        x: (parent.width - self.width) / 2;
+        y: parent.height - 4px - 2px;
+        width: root.active ? parent.width - 24px : 0px;
+        animate width { duration: 140ms; easing: ease-out; }
+        height: 2px;
+        border-radius: 2px;
+        background: Palette.accent;
+    }
+
+    tap := TouchArea {
+        clicked => { root.clicked(); }
+        mouse-cursor: pointer;
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
+                root.right-clicked();
+            }
+        }
+    }
+}
+
+component GroupTabs inherits Rectangle {
+    in property <[Group]> groups;
+    in property <int> current: 0;
+    in property <bool> keyboard-focused: false;
+    // 搜索态：隐藏普通标签行，只留一枚命中计数标签（设计规格 7.2）。
+    // 有命中 → accent 字 + 2px 下划线（active=true）；无命中 → muted 无下划线。
+    in property <bool> search-mode: false;
+    in property <int> hit-count: 0;
+    callback group-clicked(int);
+    callback group-right-clicked(int);
+    callback add-group-clicked();
+    callback add-clicked();
+    callback theme-clicked();
+
+    y: 84px;
+    height: 44px;
+    background: Palette.surface;
+
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 4px;
+        spacing: 0px;
+
+        // 标签过多时允许横向滚动，避免后续群组和“+ 分组”入口永久不可达。
+        group-strip := Flickable {
+            height: parent.height;
+            horizontal-stretch: 1;
+            content-width: inner.preferred-width;
+            content-height: inner.preferred-height;
+            inner := HorizontalLayout {
+                height: parent.height;
+                alignment: start;
+
+                if !root.search-mode : HorizontalLayout {
+                    height: parent.height;
+                    alignment: start;
+                    for g[index] in root.groups : tab-item := GroupTabItem {
+                        label: g.name;
+                        active: index == root.current;
+                        keyboard-focused: self.active && root.keyboard-focused;
+                        clicked => {
+                            root.group-clicked(index);
+                            tab-item.flash();
+                        }
+                        right-clicked => { root.group-right-clicked(index); }
+                        ensure-visible => {
+                            if (tab-item.width >= group-strip.width || tab-item.x + group-strip.content-x < 0px) {
+                                group-strip.content-x = -tab-item.x;
+                            } else if (tab-item.x + tab-item.width + group-strip.content-x > group-strip.width) {
+                                group-strip.content-x = group-strip.width - tab-item.x - tab-item.width;
+                            }
+                        }
+                    }
+                    // 紧随群组标签末尾的「+ 分组」快捷入口
+                    Rectangle {
+                        width: 58px;
+                        height: parent.height;
+                        background: transparent;
+                        Rectangle {
+                            x: 4px;
+                            y: (parent.height - 24px) / 2;
+                            width: 50px;
+                            height: 24px;
+                            border-radius: 6px;
+                            background: add_grp_tap.has-hover ? Palette.hoverBg : Palette.plBg;
+                            border-width: 1px;
+                            border-color: Palette.plBorder;
+                            Text {
+                                x: 0;
+                                y: 0;
+                                width: parent.width;
+                                height: parent.height;
+                                text: "+ 分组";
+                                font-size: 11px;
+                                font-weight: 600;
+                                color: add_grp_tap.has-hover ? Palette.ink : Palette.muted;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            add_grp_tap := TouchArea {
+                                clicked => { root.add-group-clicked(); }
+                                mouse-cursor: pointer;
+                            }
+                        }
+                    }
+                }
+                if root.search-mode : GroupTabItem {
+                    label: root.hit-count > 0 ? "跨群组 · 命中 " + root.hit-count : "没有匹配项";
+                    active: root.hit-count > 0;
+                    accent-text: root.hit-count > 0;
+                }
+            }
+        }
+
+        IconAction {
+            icon-cmds: "M 12 5 L 12 19 M 5 12 L 19 12";
+            clicked => { root.add-clicked(); }
+        }
+        IconAction {
+            // 深浅主题切换：浅色显月亮（点了去深色），深色显太阳
+            icon-cmds: Palette.dark
+                ? "M 16 12 C 16 14.21 14.21 16 12 16 C 9.79 16 8 14.21 8 12 C 8 9.79 9.79 8 12 8 C 14.21 8 16 9.79 16 12 Z M 12 1 L 12 3 M 12 21 L 12 23 M 4.22 4.22 L 5.64 5.64 M 18.36 18.36 L 19.78 19.78 M 1 12 L 3 12 M 21 12 L 23 12 M 4.22 19.78 L 5.64 18.36 M 18.36 5.64 L 19.78 4.22"
+                : "M 20 14.5 C 16.99 15.78 13.51 15.11 11.2 12.8 C 8.89 10.49 8.22 7.01 9.5 4 C 6.19 5.41 4.23 8.86 4.72 12.43 C 5.2 16 8 18.8 11.57 19.28 C 15.14 19.77 18.59 17.81 20 14.5 Z";
+            clicked => {
+                Palette.dark = !Palette.dark;
+                root.theme-clicked();
+            }
+        }
+    }
+}
+
+// ===========================================================================
+// 磁贴（标准 48×48 逻辑图标尺寸，随系统 DPI 自动等比放大；
+//   内置线性图标 24×24 1:1 对齐 24 视框；.lb 12px/500 max-width 64 单行省略）
+// ===========================================================================
+component TileView inherits Rectangle {
+    in property <Tile> data;
+    in property <bool> show-selection: false;
+    private property <bool> selected: root.data.sel && root.show-selection;
+    private property <length> pixel-size: 1phx;
+    private property <length> icon-edge: round(48px / root.pixel-size) * root.pixel-size;
+    private property <length> frame-gap: max(root.pixel-size, round(3px / root.pixel-size) * root.pixel-size);
+    private property <length> glow-gap: max(root.pixel-size, round(2px / root.pixel-size) * root.pixel-size);
+    in property <bool> reorder-enabled: false;
+    in property <bool> drop-before: false;
+    in property <bool> drop-after: false;
+    private property <bool> dragging: false;
+    private property <bool> suppress-click: false;
+    // 格宽：由「一行显示数量」决定，Rust 侧按 (496 − (n−1)×2)/n 算好后传入
+    //（n=6→81 / n=7→69 / n=8→60.25）。不再写死 81px。
+    in property <length> tile-width: 69px;
+    // 是否显示底部文字标签（关闭时只留图标，密度更高）
+    in property <bool> show-label: true;
+    callback clicked();
+    callback double-clicked();
+    // 右键 → 打开属性页（Windows 惯例；Slint 的 clicked 只响应左键）
+    callback right-clicked();
+    callback drag-started();
+    callback drag-moved(float, float);
+    callback drag-finished();
+    callback drag-cancelled();
+
+    height: root.show-label ? 82px : root.tile-width + 2px;
+    width: root.tile-width;
+    background: transparent;
+
+    VerticalLayout {
+        width: parent.width;
+        height: parent.height;
+        padding-top: root.show-label ? root.frame-gap + root.glow-gap - 2px : 0px;
+        alignment: start;
+        spacing: 4px;
+
+        // .pl 水平居中容器（VerticalLayout 交叉轴不居中，需满宽容器）
+        icon-slot := Rectangle {
+            height: root.show-label ? 52px : root.height;
+            background: transparent;
+
+            // 所有层共用图标原点，间距取整到物理像素，避免分数 DPI 下两侧差一像素。
+            Rectangle {
+                visible: root.selected;
+                x: icon-base.x - root.frame-gap - root.glow-gap;
+                y: icon-base.y - root.frame-gap - root.glow-gap;
+                width: root.icon-edge + 2 * (root.frame-gap + root.glow-gap);
+                height: self.width;
+                border-radius: 12px;
+                background: Palette.selRing;
+            }
+
+            if root.selected: Rectangle {
+                x: icon-base.x - root.frame-gap; y: icon-base.y - root.frame-gap;
+                width: root.icon-edge + 2 * root.frame-gap; height: self.width; border-radius: 10px;
+                background: Palette.selBg;
+            }
+
+            // 标准 48×48 图标底座 .pl
+            icon-base := Rectangle {
+                x: round((icon-slot.absolute-position.x + (parent.width - root.icon-edge) / 2) / root.pixel-size) * root.pixel-size - icon-slot.absolute-position.x;
+                y: round((icon-slot.absolute-position.y + (root.show-label ? 2px : (parent.height - root.icon-edge) / 2)) / root.pixel-size) * root.pixel-size - icon-slot.absolute-position.y;
+                width: root.icon-edge;
+                height: root.icon-edge;
+                border-radius: 12px;
+                background: root.data.has-native-icon
+                    ? transparent
+                    : (root.selected ? Palette.selBg : (tap.has-hover ? Palette.plHover : Palette.plBg));
+                border-width: root.data.has-native-icon ? 0px : 1px;
+                border-color: Palette.plBorder;
+                animate background { duration: 120ms; }
+
+                // 原生图标先按窗口实际物理尺寸平滑缩放，再交给软件渲染器。
+                if root.data.has-native-icon : NativeIconImage {
+                    width: parent.width;
+                    height: parent.height;
+                    x: 0px;
+                    y: 0px;
+                    original: root.data.native-icon;
+                    image-fit: contain;
+                }
+
+                // 线性图标：24 视框 commands → 标准 24px（1:1 视框整数对齐）
+                if !root.data.has-native-icon && root.data.letter != "" : LetterIcon {
+                    x: 0; y: 0; width: parent.width; height: parent.height;
+                    letter: root.data.letter; tint: root.data.tint;
+                }
+                if !root.data.has-native-icon && root.data.letter == "" : Path {
+                    width: 24px;
+                    height: 24px;
+                    x: (parent.width - 24px) / 2;
+                    y: (parent.height - 24px) / 2;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    fill: transparent;
+                    // 语义色不改数据：深色下渲染层提亮（灰 #4B5563 等在暗底可辨）
+                    stroke: Palette.dark ? root.data.tint.brighter(0.35) : root.data.tint;
+                    stroke-width: 1.8px;
+                    commands: root.data.icon;
+                }
+            }
+
+            if root.selected: Rectangle {
+                x: icon-base.x - root.frame-gap; y: icon-base.y - root.frame-gap;
+                width: root.icon-edge + 2 * root.frame-gap; height: self.width; border-radius: 10px;
+                background: transparent;
+                border-width: 1px; border-color: Palette.accent;
+            }
+        }
+
+        // .lb：12px/500 居中单行省略，选中加粗
+        // ⚠️ x 必须显式写：Text 带显式 width 66px 时 VerticalLayout 交叉轴放在 x=0
+        //（不拉伸居中），导致文字中心 33 ≠ 图标中心 40.5，整体偏左 7.5px（2026-10-21 星哥指出的对齐 bug）
+        if root.show-label : Rectangle {
+            height: 17px;
+            background: transparent;
+            Text {
+                // 设计稿 .lb{max-width:64px}：格宽变窄时文字区跟着收，
+                // 否则 8 列（格宽 60）下 64px 文字会越界压到邻格。
+                x: (parent.width - Math.min(64px, root.tile-width)) / 2;
+                width: Math.min(64px, root.tile-width);
+                height: parent.height;
+                text: root.data.label;
+                font-size: 12px;
+                font-weight: root.selected ? 600 : 500;
+                color: Palette.ink;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+    }
+
+    tap := TouchArea {
+        clicked => { if (!root.suppress-click) { root.clicked(); } }
+        double-clicked => { if (!root.suppress-click) { root.double-clicked(); } }
+        mouse-cursor: pointer;
+        moved => {
+            if (root.reorder-enabled && self.pressed) {
+                let dx = self.mouse-x - self.pressed-x;
+                let dy = self.mouse-y - self.pressed-y;
+                if (dx > 6px || dx < -6px || dy > 6px || dy < -6px) {
+                    root.dragging = true;
+                    root.suppress-click = true;
+                }
+                if (root.dragging) { root.drag-moved(self.mouse-x / 1px, self.mouse-y / 1px); }
+            }
+        }
+        // 右键 → 属性页；Slint 的 clicked 只响应左键，必须走 pointer-event
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.right && e.kind == PointerEventKind.down) {
+                root.right-clicked();
+            } else if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                root.dragging = false;
+                root.suppress-click = false;
+                root.drag-started();
+            } else if (e.kind == PointerEventKind.up && root.dragging) {
+                root.dragging = false;
+                root.drag-finished();
+            } else if (e.kind == PointerEventKind.cancel && root.dragging) {
+                root.dragging = false;
+                root.drag-cancelled();
+            }
+        }
+    }
+    Rectangle {
+        visible: root.drop-before || root.drop-after;
+        x: root.drop-after ? parent.width - 3px : 0px;
+        y: 4px;
+        width: 3px;
+        height: parent.height - 8px;
+        border-radius: 1px;
+        background: Palette.accent;
+    }
+}
+
+// ===========================================================================
+// 区块 D · 按钮网格（设计稿：margin 0 12px 高 202 overflow hidden，
+//   列数可配 6/7/8，grid gap 0 2px，底部 mask 渐隐 86%，右侧 3px 滚动条）
+// ===========================================================================
+component TileGrid inherits Flickable {
+    in property <[[Tile]]> rows;
+    in property <bool> show-selection: false;
+    in property <length> tile-width: 69px;
+    in property <bool> show-grid-lines: false;
+    in property <bool> show-label: true;
+    in property <int> columns: 7;
+    in property <int> tile-count: 0;
+    private property <length> row-height: root.show-label ? 82px : root.tile-width + 2px;
+    in property <int> drag-insert: -1;
+    in property <bool> reorder-enabled: false;
+    callback tile-clicked(int, int);
+    callback tile-double-clicked(int, int);
+    callback tile-right-clicked(int, int);
+    callback tile-drag-started();
+    callback tile-drag-moved(int, int, float, float);
+    callback tile-drag-finished(int, int);
+    callback tile-drag-cancelled();
+
+    public function reveal-index(index: int) {
+        if (index >= 0 && index < root.tile-count) {
+            let row-height = root.row-height;
+            let top = floor(index / max(1, root.columns)) * row-height;
+            if (top + root.content-y < 0px) {
+                root.content-y = -top;
+            } else if (top + row-height + root.content-y > root.height) {
+                root.content-y = root.height - top - row-height;
+            }
+        }
+    }
+
+    content-width: self.width;
+    content-height: inner.preferred-height;
+    // shortcut: 拖到网格边缘时不自动滚动，长列表需要一笔跨屏移动时再加入边缘滚动。
+    mouse-drag-pan-enabled: !root.reorder-enabled;
+
+    if root.show-grid-lines && root.rows.length > 0: Rectangle {
+        x: 0; y: 0;
+        width: root.width;
+        height: root.rows.length * root.row-height;
+        // 不透明主题色使交点保持同色，装饰层不参与布局或输入。
+        for boundary in max(0,root.columns - 1): Rectangle {
+            x: round(((boundary + 1) * (root.tile-width + 2px) - 1px) / 1phx) * 1phx;
+            y: 0;
+            width: 1phx;
+            height: parent.height;
+            background: Palette.gridLine;
+        }
+        for boundary in max(0,root.rows.length - 1): Rectangle {
+            x: 0;
+            y: round(((boundary + 1) * root.row-height + root.content-y) / 1phx) * 1phx - root.content-y;
+            width: parent.width;
+            height: 1phx;
+            background: Palette.gridLine;
+        }
+    }
+
+    inner := VerticalLayout {
+        width: parent.width;
+        spacing: 0px; // CSS gap 0 2px：行距 0
+
+        for row[ri] in rows : HorizontalLayout {
+            spacing: 2px; // 列距 2px
+            for tile[ci] in row : TileView {
+                data: tile;
+                show-selection: root.show-selection;
+                tile-width: root.tile-width;
+                show-label: root.show-label;
+                reorder-enabled: root.reorder-enabled;
+                drop-before: root.drag-insert == ri * root.columns + ci;
+                drop-after: root.drag-insert == root.tile-count && ri * root.columns + ci == root.tile-count - 1;
+                clicked => { root.tile-clicked(ri, ci); }
+                double-clicked => { root.tile-double-clicked(ri, ci); }
+                right-clicked => { root.tile-right-clicked(ri, ci); }
+                drag-started => { root.tile-drag-started(); }
+                drag-moved(x, y) => { root.tile-drag-moved(ri, ci, x, y); }
+                drag-finished => { root.tile-drag-finished(ri, ci); }
+                drag-cancelled => { root.tile-drag-cancelled(); }
+            }
+        }
+    }
+}
+
+// ===========================================================================
+// 底栏键帽组合：固定宽度键帽 + 说明文字（垂直居中各自手算，避免布局重排）
+// ===========================================================================
+component FootHint inherits Rectangle {
+    in property <string> key;
+    in property <length> key-w;
+    in property <string> label;
+    // 说明文字宽度：12px 中文按 12px/字 估宽（默认 2 字；「新建按钮」这类 4 字传 48px）。
+    // ⚠️ 必须写死：HorizontalLayout 会覆盖子元素按内容推出来的宽度（坑 6.12）。
+    in property <length> label-w: 24px;
+
+    // 高度由所在 HorizontalLayout 交叉轴拉伸（组件顶层不可引用 parent）
+    width: key-w + 5px + label-w;
+
+    Kbd {
+        text: root.key;
+        x: 0;
+        y: (parent.height - self.height) / 2;
+        width: root.key-w;
+    }
+    Text {
+        x: root.key-w + 5px;
+        width: root.label-w;
+        height: parent.height;
+        text: root.label;
+        font-size: 12px;
+        color: Palette.muted;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+}
+
+// ===========================================================================
+// 区块 E · 底栏（设计稿：44px bg #f5f6f9 上边线 rgba(15,23,42,.07)，
+//   padding 0 16px gap 14 12px #586070；「拖入文件即可添加」+ kbd ↵启动 + kbd Esc 收起）
+// ===========================================================================
+component PanelFoot inherits Rectangle {
+    // 搜索态换文案（设计规格 7.2）：左「在「A / B / C」中命中 N 个」；
+    // 右 Enter 启动（无结果时＝新建按钮）+ Esc 清除。
+    in property <bool> search-mode: false;
+    in property <string> hit-text;
+    in property <string> run-hint: "启动";
+    // run-hint 的文字宽度（12px/字）。Slint 里 Text 自己算的宽不可用于在
+    // HorizontalLayout 里占位（坑 6.12），所以宽度跟着文案一起由装配层给。
+    in property <length> run-hint-w: 24px;
+
+    height: 44px;
+    background: Palette.footBg;
+// ⚠️ y 必须显式写 0：Slint 未写 y 的子元素实测渲染在父容器垂直居中位（(44-1)/2≈22px），
+    // 2026-10-21 二分实验实锤——设计稿顶线曾被画到 y=352 形成横穿底栏的灰线
+    Rectangle { y: 0; width: parent.width; height: 1px; background: Palette.line; }
+
+    HorizontalLayout {
+        y: 1px;
+        height: parent.height - 1px;
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 14px;
+
+        Text {
+            text: root.search-mode ? root.hit-text : "拖入文件即可添加";
+            font-size: 12px;
+            color: Palette.muted;
+            vertical-alignment: center;
+            overflow: elide;
+            horizontal-stretch: 1;
+        }
+
+        // kbd + 说明文字组合：键帽宽固定（HorizontalLayout 会覆盖子元素显式宽度，
+        // 依赖运行时 preferred-width 的动态宽在布局内被重排导致重叠，2026-10-21 实测踩坑）
+        // 设计稿键帽是 ↵，但微软雅黑无 U+21B5 字形（实测渲染空白），换 Enter
+        FootHint { key: "Enter"; key-w: 40px; label: root.run-hint; label-w: root.run-hint-w; }
+        FootHint { key: "Esc"; key-w: 34px; label: root.search-mode ? "清除" : "收起"; }
+    }
+}
+
+// ===========================================================================
+// ⑬ 运行历史浮层（设计规格 7.11）
+//   设计稿卡片按 460 宽绘制且**含搜索条**，折算到真实面板后：
+//     x = 12（与搜索条左对齐）/ y = 84（搜索条 40+44 正下方）/ 宽 = 496（= 搜索条宽）
+//     高 = 246（底边落在底栏上沿 330，不压底栏；内容实高 ≈ 217，余量留白）
+//   行 32 高：26×26 图标 + 名称 13 + 右端相对时间 11 muted；底部「清除历史」28 高居中
+// ===========================================================================
+component HistoryRowView inherits Rectangle {
+    in property <HistoryRow> data;
+    callback clicked();
+
+    height: 30px;
+    // ⚠️ 宽度写死：浮层内容宽 = 496 − 左右 padding 12×2。组件顶层不能引用 parent。
+    width: 472px;
+    background: tap.has-hover ? Palette.plBg : transparent;
+    border-radius: 8px;
+
+    // 标准 24×24 图标位（原生图标 24×24，内置线性图标 16px）
+    Rectangle {
+        x: 5px;
+        y: 3px;
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        background: root.data.has-native-icon ? transparent : Palette.plBg;
+
+        if root.data.has-native-icon : NativeIconImage {
+            width: 24px;
+            height: 24px;
+            x: 0px;
+            y: 0px;
+            original: root.data.native-icon;
+            image-fit: contain;
+        }
+
+        if !root.data.has-native-icon && root.data.letter != "" : LetterIcon {
+            x: 0; y: 0; width: 24px; height: 24px;
+            letter: root.data.letter; tint: root.data.tint;
+        }
+        if !root.data.has-native-icon && root.data.letter == "" : Path {
+            width: 16px;
+            height: 16px;
+            x: (parent.width - 16px) / 2;
+            y: (parent.height - 16px) / 2;
+            viewbox-width: 24;
+            viewbox-height: 24;
+            fill: transparent;
+            stroke: Palette.dark ? root.data.tint.brighter(0.35) : root.data.tint;
+            stroke-width: 1.8px;
+            commands: root.data.icon;
+        }
+    }
+
+    Text {
+        x: 40px;
+        y: 0px;
+        width: 300px;
+        height: parent.height;
+        text: root.data.label;
+        font-size: 13px;
+        color: Palette.ink;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    Text {
+        x: parent.width - 92px;
+        y: 0px;
+        width: 80px;
+        height: parent.height;
+        text: root.data.time;
+        font-size: 11px;
+        color: Palette.muted;
+        horizontal-alignment: right;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    tap := TouchArea {
+        clicked => { root.clicked(); }
+        mouse-cursor: pointer;
+    }
+}
+
+component HistoryPanel inherits Rectangle {
+    in property <[HistoryRow]> rows;
+    callback row-clicked(int);
+    callback clear();
+
+    width: 496px;
+    height: 214px;
+    background: Palette.surface;
+    border-width: 1px;
+    border-color: Palette.panelBorder;
+    border-radius: 14px;
+
+    Text {
+        x: 18px;
+        y: 8px;
+        height: 14px;
+        text: "最近使用";
+        font-size: 11px;
+        font-weight: 600;
+        color: Palette.muted;
+        vertical-alignment: center;
+    }
+
+    for h[index] in root.rows : HistoryRowView {
+        x: 12px;
+        y: 26px + index * 30px;
+        data: h;
+        clicked => { root.row-clicked(index); }
+    }
+
+    Rectangle {
+        x: 12px;
+        y: 178px;
+        width: parent.width - 24px;
+        height: 1px;
+        background: Palette.line;
+    }
+
+    Rectangle {
+        x: 12px;
+        y: 182px;
+        width: parent.width - 24px;
+        height: 26px;
+        border-radius: 8px;
+        background: clear-tap.has-hover ? Palette.plBg : transparent;
+
+        Text {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            text: "清除历史";
+            font-size: 12px;
+            color: Palette.muted;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        clear-tap := TouchArea {
+            clicked => { root.clear(); }
+            mouse-cursor: pointer;
+        }
+    }
+}
+
+// ===========================================================================
+// 主面板 v2：40(标题) + 44(搜索) + 44(标签) + grid-height(1~6行动态自适应) + 44(底栏)
+// ===========================================================================
+export component MainPanel inherits Window {
+    title: "ZapLaunch";
+    no-frame: true;
+    width: 520px;
+    height: 172px + root.grid-height;
+    background: Palette.surface;
+    default-font-family: "Microsoft YaHei";
+    default-font-size: 13px;
+
+    // 真实输入框持有焦点，框架才能同时开启中文输入法及组合输入事件。
+    forward-focus: search-bar;
+
+    in property <[[Tile]]> rows;
+    // 网格区动态高度（2~6 行自适应，默认 2 行紧凑高度 170px，最多 6 行平铺）
+    in-out property <bool> keyboard-navigation: false;
+    out property <bool> selection-visible: root.keyboard-navigation || root.searching;
+    property <bool> tab-in-groups: false;
+    out property <bool> group-focus-visible: root.tab-in-groups && panel-focus.has-focus
+        && !root.searching && !root.keyboard-navigation && !root.group-modal-open;
+    in-out property <length> grid-height: 170px;
+    // 单个磁贴格宽（由「一行显示数量」6/7/8 算出，Rust 侧 set_tile_width）
+    in-out property <length> tile-width: 69px;
+    in property <int> tile-columns: 7;
+    in property <bool> reorder-enabled: false;
+    in-out property <int> drag-insert: -1;
+    // 磁贴上是否显示名称（设置项 tile_show_label）
+    in property <bool> tile-show-label: true;
+    // 网格超出两行时是否显示滚动条（设置项 grid_scrollbar）
+    in property <bool> grid-lines: false;
+    in property <bool> grid-scrollbar: true;
+    in property <[Group]> groups;
+    in-out property <int> current-group: 0;
+    in property <float> phase: 0.0;
+    in property <bool> stress-mode: false;
+    // 当前群组无按钮时显示空状态层（设计规格 7.4）
+    in property <bool> show-empty: false;
+    // ---- 批次 E-a：③ 搜索态 + ⑬ 运行历史浮层（设计规格 7.2 / 7.11）----
+    // 搜索词：与搜索框输入框双向绑定 —— Rust 侧 set_query("") 即可清空输入框
+    // （清词后输入框变化不再回灌 Rust：`edited` 会带来一次空词回调，幂等无害）
+    in-out property <string> query <=> search-bar.text;
+    // 是否处于搜索态（query 去空白后非空）
+    in property <bool> searching: false;
+    in property <bool> search-pending: false;
+    out property <bool> search-input-focused: search-bar.input-focused;
+    out property <bool> group-input-focused: root.group-modal-open && group_name_input.has-focus;
+    // 原生激活事件丢失时 has-focus 也会变假，单独保留用户当前请求的焦点目标。
+    out property <bool> text-input-requested: true;
+    changed search-input-focused => { if (root.search-input-focused) { root.text-input-requested = true; } }
+    // 命中数
+    in property <int> hit-count: 0;
+    // 底栏左文案（搜索态）：「在「常用 / 工具 / 网页」中命中 3 个」
+    in property <string> hit-text: "";
+    // 底栏 Enter 说明：常态「启动」/ 有结果「启动 X」/ 无结果「新建按钮」
+    in property <string> run-hint: "启动";
+    // run-hint 的文字宽度（12px/字，HorizontalLayout 内必须写死，见坑 6.12）
+    in property <length> run-hint-w: 24px;
+    // 运行历史浮层是否展开
+    in-out property <bool> history-open: false;
+    // 运行历史行（最多 5 条，新的在前）
+    in property <[HistoryRow]> history: [];
+    // 新建/编辑分组内联弹窗状态
+    in-out property <bool> group-modal-open: false;
+    in-out property <bool> group-modal-editing: false;
+    in-out property <bool> group-can-delete: false;
+    in-out property <string> group-modal-name: "";
+    in-out property <int> group-modal-position: 0;
+
+    callback settings-clicked();
+    callback minimize-clicked();
+    callback close-clicked();
+    callback theme-clicked();
+    callback add-clicked();
+    callback add-group-clicked();
+    callback tab-consumed();
+    callback tab-to-search();
+    callback group-clicked(int); // UI 内已改 current-group，此回调通知 Rust 换网格数据
+    callback group-right-clicked(int); // 右键群组标签 → 重命名或删除该群组
+    callback group-modal-save();
+    callback group-modal-delete();
+    callback group-modal-cancel();
+    callback tile-clicked(int, int);
+    callback tile-double-clicked(int, int);
+    callback tile-right-clicked(int, int);
+    callback tile-drag-started();
+    callback tile-drag-moved(int, int, float, float);
+    callback tile-drag-finished(int, int);
+    callback tile-drag-cancelled();
+    callback esc-clicked();
+    // 常态网格方向键导航：0左 / 1右 / 2上 / 3下。
+    callback navigate-grid(int);
+    callback cycle-results(bool);
+    // ③ 搜索：键入即过滤（跨群组）
+    callback search-changed(string);
+    // Enter 启动当前选中项（无结果 → 新建按钮）。
+    callback search-accepted();
+    // ⑬ 运行历史：搜索框为空且聚焦时按 ↓ 展开
+    callback search-down();
+    callback history-clicked(int);
+    callback history-clear();
+    // Rust 侧接住后调 Win32 让系统接管窗口拖动
+    callback drag-window();
+
+    // 手动聚焦搜索框输入框。
+    public function focus-search() {
+        root.tab-in-groups = false;
+        root.text-input-requested = true;
+        root.keyboard-navigation = false;
+        search-bar.focus-input();
+    }
+
+    public function reveal-tile(index: int) {
+        grid.reveal-index(index);
+    }
+
+    // 移除搜索框焦点，将焦点交回主面板根级 FocusScope（使搜索框恢复未聚焦状态并展示占位提示词）。
+    public function clear-search-focus() {
+        root.text-input-requested = false;
+        panel-focus.focus();
+    }
+
+    public function cycle-focus(backwards: bool) {
+        root.tab-consumed();
+        if (!root.group-modal-open && root.drag-insert < 0) {
+            root.history-open = false;
+            if (root.searching) {
+                root.cycle-results(backwards);
+            } else if (root.groups.length == 0 || (!root.search-input-focused &&
+                ((backwards && root.current-group <= 0) || (!backwards && root.current-group >= root.groups.length - 1)))) {
+                if (!root.search-input-focused) { root.tab-to-search(); }
+                root.focus-search();
+            } else {
+                root.current-group = root.search-input-focused
+                    ? (backwards ? root.groups.length - 1 : 0)
+                    : max(0, min(root.groups.length - 1, root.current-group + (backwards ? -1 : 1)));
+                root.keyboard-navigation = false;
+                root.clear-search-focus();
+                root.tab-in-groups = true;
+                root.group-clicked(root.current-group);
+            }
+        }
+    }
+
+    // 打开新建/编辑群组弹窗时聚焦群组名输入框。
+    public function focus-group-input() {
+        root.text-input-requested = true;
+        group_name_input.focus();
+        group_name_input.select-all();
+    }
+
+    public function restore-input-focus() {
+        if (!root.text-input-requested) { return; }
+        if (root.group-modal-open) {
+            let anchor = group_name_input.anchor-position-byte-offset;
+            let cursor = group_name_input.cursor-position-byte-offset;
+            panel-focus.focus();
+            group_name_input.focus();
+            group_name_input.set-selection-offsets(anchor,cursor);
+        } else {
+            search-bar.restore-input-focus();
+        }
+    }
+
+    panel-focus := FocusScope {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        key-pressed(event) => {
+            if (event.text == Key.Tab && !event.modifiers.control && !event.modifiers.alt && !event.modifiers.meta && !root.group-modal-open) {
+                root.cycle-focus(event.modifiers.shift);
+                accept
+            } else if (event.text == Key.Escape && !root.group-modal-open) {
+                root.esc-clicked();
+                accept
+            } else if (event.text == Key.Return && !root.group-modal-open) {
+                root.search-accepted();
+                accept
+            } else if (event.text == Key.LeftArrow && !root.group-modal-open) {
+                root.navigate-grid(0);
+                accept
+            } else if (event.text == Key.RightArrow && !root.group-modal-open) {
+                root.navigate-grid(1);
+                accept
+            } else if (event.text == Key.UpArrow && !root.group-modal-open) {
+                root.navigate-grid(2);
+                accept
+            } else if (event.text == Key.DownArrow && !root.group-modal-open) {
+                root.navigate-grid(3);
+                accept
+            } else {
+                reject
+            }
+        }
+    }
+
+
+    TitleBar {
+        y: 0;
+        width: parent.width;
+        settings-clicked => { root.settings-clicked(); }
+        minimize-clicked => { root.minimize-clicked(); }
+        close-clicked => { root.close-clicked(); }
+        drag-start => { root.drag-window(); }
+    }
+
+    search-bar := SearchBar {
+        x: 12px;
+        y: 40px;
+        width: parent.width - 24px;
+        esc-clicked => { root.esc-clicked(); }
+        text-changed(s) => { root.search-changed(s); } // 过滤（跨群组）
+        accepted => { root.search-accepted(); }       // Enter：启动
+        down-pressed => { root.search-down(); }       // ↓：展开运行历史
+        tab-pressed(backwards) => { root.cycle-focus(backwards); }
+        release-focus => { panel-focus.focus(); }
+    }
+
+    GroupTabs {
+        y: 84px;
+        width: parent.width;
+        groups: root.groups;
+        current: root.current-group;
+        keyboard-focused: root.group-focus-visible;
+        search-mode: root.searching;
+        hit-count: root.hit-count;
+        group-clicked(i) => {
+            root.tab-in-groups = false;
+            root.current-group = i;
+            root.group-clicked(i);
+        }
+        group-right-clicked(i) => { root.group-right-clicked(i); }
+        add-group-clicked => { root.add-group-clicked(); }
+        add-clicked => { root.add-clicked(); }
+        theme-clicked => { root.theme-clicked(); }
+    }
+
+    // 网格区：x 12 width 496（设计稿 margin 0 12px），高随 1~6 行自适应，overflow hidden
+    Rectangle {
+        x: 12px;
+        y: 128px;
+        width: parent.width - 24px;
+        height: root.grid-height;
+        background: transparent;
+        clip: true;
+
+        grid := TileGrid {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            rows: root.rows;
+            show-selection: root.selection-visible;
+            tile-width: root.tile-width;
+            show-label: root.tile-show-label;
+            show-grid-lines: root.grid-lines;
+            columns: root.tile-columns;
+            tile-count: root.hit-count;
+            drag-insert: root.drag-insert;
+            reorder-enabled: root.reorder-enabled && !root.searching;
+            tile-clicked(r, c) => {
+                root.tab-in-groups = false;
+                root.tile-clicked(r, c);
+            }
+            tile-double-clicked(r, c) => { root.tile-double-clicked(r, c); }
+            tile-right-clicked(r, c) => { root.tile-right-clicked(r, c); }
+            tile-drag-started => { root.tile-drag-started(); }
+            tile-drag-moved(r, c, x, y) => { root.tile-drag-moved(r, c, x, y); }
+            tile-drag-finished(r, c) => { root.tile-drag-finished(r, c); }
+            tile-drag-cancelled => { root.tile-drag-cancelled(); }
+        }
+
+        // 空状态（设计规格 7.4）：群组无按钮时覆盖网格内容。
+        // 位置全部显式算（坑 11/12：布局内元素不依赖默认居中行为）。
+        Rectangle {
+            visible: root.show-empty && !root.searching;
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            background: Palette.surface;
+
+            Rectangle {
+                x: (parent.width - 56px) / 2;
+                y: 28px;
+                width: 56px;
+                height: 56px;
+                border-radius: 16px;
+                background: Palette.plBg;
+                border-width: 1px;
+                border-color: Palette.plBorder;
+
+                Path {
+                    width: 24px;
+                    height: 24px;
+                    x: (parent.width - 24px) / 2;
+                    y: (parent.height - 24px) / 2;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    fill: transparent;
+                    stroke: Palette.muted;
+                    stroke-width: 1.8px;
+                    commands: "M 5 3 L 19 3 C 20.1 3 21 3.9 21 5 L 21 19 C 21 20.1 20.1 21 19 21 L 5 21 C 3.9 21 3 20.1 3 19 L 3 5 C 3 3.9 3.9 3 5 3 Z M 12 8 L 12 16 M 8 12 L 16 12";
+                }
+            }
+
+            Text {
+                x: 0;
+                y: 94px;
+                width: parent.width;
+                height: 18px;
+                text: "这个群组还没有按钮";
+                font-size: 13px;
+                font-weight: 600;
+                color: Palette.ink;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            Text {
+                x: 0;
+                y: 118px;
+                width: parent.width;
+                height: 16px;
+                text: "把文件拖进来即可添加";
+                font-size: 12px;
+                color: Palette.muted;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // ③-b 无结果层（设计规格 7.2）：搜索态且命中 0 时替换网格内容。
+        // 56×56 r16 方块（放大镜 + 斜线）+ 主副文案；副文案明示回车可新建按钮。
+        Rectangle {
+            visible: root.searching && root.hit-count == 0;
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: parent.height;
+            background: Palette.surface;
+
+            Rectangle {
+                x: (parent.width - 56px) / 2;
+                y: 28px;
+                width: 56px;
+                height: 56px;
+                border-radius: 16px;
+                background: Palette.plBg;
+                border-width: 1px;
+                border-color: Palette.plBorder;
+
+                Path {
+                    width: 24px;
+                    height: 24px;
+                    x: (parent.width - 24px) / 2;
+                    y: (parent.height - 24px) / 2;
+                    viewbox-width: 24;
+                    viewbox-height: 24;
+                    fill: transparent;
+                    stroke: Palette.muted;
+                    stroke-width: 1.8px;
+                    commands: "M 11 4 C 14.87 4 18 7.13 18 11 C 18 14.87 14.87 18 11 18 C 7.13 18 4 14.87 4 11 C 4 7.13 7.13 4 11 4 Z M 16.5 16.5 L 21 21 M 6 6 L 18 18";
+                }
+            }
+
+            Text {
+                x: 0;
+                y: 94px;
+                width: parent.width;
+                height: 18px;
+                text: root.search-pending ? "正在解析快捷方式…" : "没有匹配「" + root.query + "」的按钮";
+                font-size: 13px;
+                font-weight: 600;
+                color: Palette.ink;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            Text {
+                x: 0;
+                y: 118px;
+                width: parent.width;
+                height: 16px;
+                text: root.search-pending ? "解析完成后会自动更新结果" : "回车可在当前群组新建一个按钮";
+                font-size: 12px;
+                color: Palette.muted;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        // 底部渐隐 mask：仅当行数超过 6 行上限（内容可滚动）时显示，6 行内平铺不遮挡末行文字。
+        Rectangle {
+            visible: grid.content-height > grid.height + 2px;
+            y: parent.height - 28px;
+            width: parent.width;
+            height: 28px;
+            background: @linear-gradient(180deg, #00000000, Palette.surface);
+        }
+
+        // 滚动条：3px 宽 130px 高 r3，位置随 Flickable viewport 联动（超出 6 行时出现）
+        Rectangle {
+            visible: root.grid-scrollbar && grid.content-height > grid.height + 2px;
+            x: parent.width - 3px;
+            width: 3px;
+            height: 130px;
+            border-radius: 3px;
+            background: Palette.barShadow;
+            y: 4px + (grid.content-height > grid.height
+                ? (-grid.content-y / (grid.content-height - grid.height)) * (root.grid-height - 8px - 130px)
+                : 0px);
+        }
+        // 外框固定在可见区域，滚动和底部渐隐不会截断四周边线。
+        if root.grid-lines && root.rows.length > 0: Rectangle {
+            x: 0; y: 0;
+            width: parent.width;
+            height: round(min(grid.content-height, grid.height) / 1phx) * 1phx;
+            border-width: 1phx;
+            border-color: Palette.gridLine;
+        }
+    }
+
+    PanelFoot {
+        y: parent.height - 44px;
+        width: parent.width;
+        search-mode: root.searching;
+        hit-text: root.hit-text;
+        run-hint: root.run-hint;
+        run-hint-w: root.run-hint-w;
+    }
+
+    // ⑬ 运行历史浮层（规格 7.11）：覆盖标签行 + 网格区，底边落在底栏上沿。
+    // 放在网格之后 = 盖在网格上面；历史为空或未按 ↓ 时不显示。
+    history-panel := HistoryPanel {
+        visible: root.history-open;
+        x: 12px;
+        y: 84px;
+        rows: root.history;
+        row-clicked(i) => { root.history-clicked(i); }
+        clear => { root.history-clear(); }
+    }
+
+    // ⑭ 新建 / 编辑分组内联模态卡片（点「+ 分组」或右键分组标签呼出）
+    Rectangle {
+        visible: root.group-modal-open;
+        x: 0px;
+        y: 40px;
+        width: parent.width;
+        height: parent.height - 40px;
+        background: #00000045;
+
+        // 点击遮罩空白处关闭弹窗
+        TouchArea {
+            clicked => { root.group-modal-cancel(); }
+        }
+
+        // 新建 310×148，编辑增加一行分组顺序控制。
+        Rectangle {
+            x: (parent.width - 310px) / 2;
+            y: (parent.height - self.height) / 2 - 10px;
+            width: 310px;
+            height: root.group-modal-editing ? 196px : 148px;
+            border-radius: 14px;
+            background: Palette.surface;
+            border-width: 1px;
+            border-color: Palette.panelBorder;
+
+            // 阻止点击卡片内部穿透到背景遮罩
+            TouchArea {}
+
+            Text {
+                x: 18px;
+                y: 14px;
+                width: 200px;
+                height: 20px;
+                text: root.group-modal-editing ? "编辑分组" : "新建分组";
+                font-size: 14px;
+                font-weight: 600;
+                color: Palette.ink;
+                vertical-alignment: center;
+            }
+
+            // 分组名称输入框
+            Rectangle {
+                x: 18px;
+                y: 44px;
+                width: parent.width - 36px;
+                height: 36px;
+                border-radius: 8px;
+                background: Palette.plBg;
+                border-width: group_name_input.has-focus ? 2px : 1px;
+                border-color: group_name_input.has-focus ? Palette.accent : Palette.plBorder;
+
+                group_name_input := TextInput {
+                    x: 10px;
+                    y: 0px;
+                    width: parent.width - 20px;
+                    height: parent.height;
+                    text <=> root.group-modal-name;
+                    font-size: 13px;
+                    color: Palette.ink;
+                    vertical-alignment: center;
+                    single-line: true;
+                    accepted => {
+                        root.group-modal-save();
+                    }
+                    key-pressed(event) => {
+                        if (event.text == Key.Escape) {
+                            root.group-modal-cancel();
+                            accept
+                        } else {
+                            reject
+                        }
+                    }
+                }
+
+                Text {
+                    // 聚焦时隐藏提示词，避免中文输入法预编辑（Preedit）编码与提示词重叠
+                    visible: root.group-modal-name == "" && !group_name_input.has-focus;
+                    x: 10px;
+                    y: 0px;
+                    width: parent.width - 20px;
+                    height: parent.height;
+                    text: "输入分组名称（如：办公、开发、游戏）";
+                    font-size: 12px;
+                    color: Palette.muted;
+                    vertical-alignment: center;
+                }
+            }
+
+            if root.group-modal-editing: Text {
+                x: 18px; y: 96px; width: 72px; height: 32px;
+                text: "顺序 " + (root.group-modal-position + 1) + "/" + root.groups.length;
+                font-size: 12px;
+                color: Palette.muted;
+                vertical-alignment: center;
+            }
+            if root.group-modal-editing: ActionButton {
+                x: 94px; y: 96px; width: 94px;
+                text: "← 向左移";
+                enabled: root.group-modal-position > 0;
+                clicked => { root.group-modal-position -= 1; }
+            }
+            if root.group-modal-editing: ActionButton {
+                x: 196px; y: 96px; width: 96px;
+                text: "向右移 →";
+                enabled: root.group-modal-position < root.groups.length - 1;
+                clicked => { root.group-modal-position += 1; }
+            }
+
+            // 左下角：删除分组（仅编辑模式且总分组数 > 1 时显示）
+            DangerLink {
+                visible: root.group-modal-editing && root.group-can-delete;
+                x: 18px;
+                y: root.group-modal-editing ? 144px : 98px;
+                text: "删除分组";
+                clicked => { root.group-modal-delete(); }
+            }
+
+            // 右下角：取消 + 保存
+            ActionButton {
+                x: parent.width - 18px - 64px - 8px - self.width;
+                y: root.group-modal-editing ? 144px : 98px;
+                text: "取消";
+                kind: 0;
+                clicked => { root.group-modal-cancel(); }
+            }
+
+            ActionButton {
+                x: parent.width - 18px - self.width;
+                y: root.group-modal-editing ? 144px : 98px;
+                text: root.group-modal-editing ? "保存" : "创建";
+                kind: 1;
+                clicked => { root.group-modal-save(); }
+            }
+        }
+    }
+
+    // 面板 1px 边框装饰层（设计稿 rgba(15,23,42,.08)；Window 无 border 属性。
+    // 纯装饰无 TouchArea 不拦截事件；DWM 圆角下四角被系统裁掉，中间直边保留，无害）
+Rectangle {
+        width: parent.width;
+        height: parent.height;
+        border-width: 1px;
+        border-color: Palette.panelBorder;
+        background: transparent;
+    }
+
+    // 压力测试指示条：仅 --stress 模式显示（平时必须隐藏）
+    Rectangle {
+        visible: root.stress-mode;
+        y: parent.height - 3px;
+        height: 3px;
+        width: 48px;
+        x: (root.width - 48px) * ((root.phase + 1.0) / 2.0);
+        background: Palette.accent;
+        opacity: 0.30;
+    }
+}
