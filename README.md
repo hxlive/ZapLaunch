@@ -10,6 +10,10 @@
 
 默认面板有「常用」「工具」「网页」三个分组。你可以先在「常用」里点击计算器，也可以切到「网页」后输入 `jsq`，直接从搜索结果打开计算器。加入自己的项目目录后，下次既能从项目分组里点开，也能按名称搜到。
 
+<p align="center">
+  <img src="screenshot.png" alt="ZapLaunch 截图" width="801">
+</p>
+
 [完整使用说明](使用说明.md)
 
 ## 适合怎么用
@@ -77,7 +81,7 @@
 
 ## 从源码构建
 
-项目使用 Rust 和 Slint。Windows x64 构建需要 `x86_64-pc-windows-gnu` Rust 工具链，以及 PATH 中的 MinGW-w64 GCC 和 `windres`。也可以运行[构建脚本](app/build.bat)。
+项目使用 Rust 和 Slint。Windows x64 构建需要 `x86_64-pc-windows-gnu` Rust 工具链，以及 PATH 中的 MinGW-w64 GCC 和 `windres`。
 
 ```powershell
 cd app
@@ -87,7 +91,7 @@ cargo test --workspace --locked
 
 可执行文件位于 `app/target/release/zaplaunch.exe`。重新构建前，请先从托盘退出正在运行的同路径程序。
 
-Slint 相关依赖锁定在 1.18.1。升级时需核对项目用于关闭运行时 SVG 解码的 Winit 补丁。[源码结构](app/docs/源码结构.md) · [设计规格](app/docs/设计规格.md)
+Slint 相关依赖锁定在 1.18.1。升级时需核对项目用于关闭运行时 SVG 解码的 Winit 补丁。[](app/docs/设计规格.md)
 
 ## 项目结构
 
